@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: wondy-frame
-          image: ghcr.io/sivertheisholt/wondy-frame:2026.06.20-18.50-e021b21 # {"$imagepolicy": "wondy-services:wondy-frame"}
+          image: ghcr.io/sivertheisholt/wondy-frame:2026.07.10-17.13-e7eb267 # {"$imagepolicy": "wondy-services:wondy-frame"}
           env:
             - name: DISCORD_TOKEN
               valueFrom:
