@@ -1,3 +1,5 @@
+use std::{sync::{Arc, OnceLock}, time::{Duration, Instant}};
+use tokio::sync::Mutex;
 use serenity::all::CreateEmbed;
 use serenity::all::CreateEmbedFooter;
 use tracing::{error, info};
@@ -20,21 +22,35 @@ pub async fn deimos(
     info!("Deimos command called");
     let is_public = public.unwrap_or(false);
     let client: &warframe::worldstate::Client = &ctx.data().client;
-    let cambion_drift: CambionDrift = match client.fetch::<CambionDrift>().await {
-        Ok(v) => v,
-        Err(e) => {
-            error!("Error fetching data from API: {:?}", e);
-
-            ctx.send(
-                poise::CreateReply::default()
-                    .content("Could not fetch Deimos data at this time due to external failure with Warframe API.")
-                    .ephemeral(!is_public),
-            )
-            .await?;
-
-            return Ok(());
+    // One shared cache per world-state endpoint, including concurrent requests.
+    static CACHE: OnceLock<Mutex<Option<(Instant, Arc<CambionDrift>)>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(None));
+    let mut cached = cache.lock().await;
+    let fresh = cached.as_ref().and_then(|(created, value)| {
+        (created.elapsed() < Duration::from_secs(300)).then(|| Arc::clone(value))
+    });
+    let cambion_drift: Arc<CambionDrift> = if let Some(value) = fresh {
+        value
+    } else {
+        match client.fetch::<CambionDrift>().await {
+            Ok(value) => {
+                let value = Arc::new(value);
+                *cached = Some((Instant::now(), Arc::clone(&value)));
+                value
+            }
+            Err(e) => {
+                error!("Error fetching data from API: {:?}", e);
+                ctx.send(
+                    poise::CreateReply::default()
+                        .content("Could not fetch Deimos data at this time due to external failure with Warframe API.")
+                        .ephemeral(!is_public),
+                )
+                .await?;
+                return Ok(());
+            }
         }
     };
+    drop(cached);
 
     let embed: CreateEmbed = CreateEmbed::new()
         .title("Deimos")
